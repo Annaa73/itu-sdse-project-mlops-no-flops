@@ -1,6 +1,6 @@
-# everything underneath the # SERVE THE MODEL LOCALLY (but we need to import the model that is)
-
 # Imports
+# ----------------
+
 import os
 import atexit
 import subprocess
@@ -11,14 +11,25 @@ import uvicorn
 from fastapi import FastAPI, Query, Request, Response
 from datetime import datetime, timedelta, timezone
 from scipy.stats import ks_2samp
-import threading
-import requests
-import base64
+import numpy as np
+from pathlib import Path
+import json
 
 
+from source_code.config import (
+    model_path,
+    upstream_port,
+    upstream_host,
+    inference_log_path,
+    drift_default_days,
+    drift_baseline_stats_path,
+    port,
+    drift_ks_pvalue_threshold
+)
 
-# FastAPI/uvicorn are installed as MLflow dependencies (MLflow's own scoring
-# server uses them)
+# ----------------
+
+# Scoring server
 
 def _start_scoring_server():
     env = os.environ.copy()
@@ -37,9 +48,7 @@ def _start_scoring_server():
     atexit.register(lambda: proc.poll() is None and proc.terminate())
     return proc
 
-scoring_proc = _start_scoring_server()
-print("Scoring server starting on port", upstream_port)
-
+# Drift detection
 
 def load_inference_logs(log_path=inference_log_path):
     """Load the inference log JSON file (may not exist yet)."""
@@ -202,10 +211,6 @@ def detect_drift(logs, days=drift_default_days, baseline_stats=None):
         },
     }
 
-print("Drift detection functions defined")
-
-app = FastAPI(docs_url=None, openapi_url=None, redoc_url=None)
-
 def _upstream_health():
     """Return the scoring server's /health status code, None if unreachable."""
     try:
@@ -218,6 +223,17 @@ def _upstream_health():
         return e.code
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
+
+
+# API
+# - GET  `/health`      -> `{"status": "ok"}` once the scoring server is up, `"loading"` (503) while it loads, `"error"` (503) if it died
+# - POST `/invocations` -> forwarded unchanged to the scoring server
+# - POST `/infer`       -> alias of `/invocations`
+# - GET  `/version`     -> the model version and training timestamp of the served model
+# - GET  `/drift`       -> drift detection (KS tests) over the requests logged by the scoring server
+
+scoring_proc = None
+app = FastAPI(docs_url=None, openapi_url=None, redoc_url=None)
 
 @app.get("/health")
 def health():
@@ -273,71 +289,17 @@ def drift(days: int = Query(default=drift_default_days, ge=1)):
     baseline = load_baseline_stats()
     return detect_drift(logs, days=days, baseline_stats=baseline)
 
-print("API defined")
 
 
-# uvicorn.run would block the notebook, so the API runs in a background thread
-api_config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
-api_server = uvicorn.Server(api_config)
+def main():
+    global scoring_proc
+    scoring_proc = _start_scoring_server()
 
-api_thread = threading.Thread(target=api_server.run, daemon=True)
-api_thread.start()
-print(f"API server starting on http://localhost:{port} (background thread)")
+    # No longer running in a notebook, so we use uvicorn.run directly (no background thread)
 
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    
+    # Dropped the manual shutdown: since stopping now happens automatically
 
-# Wait for the scoring server to come up (loading torch takes a while)
-for attempt in range(120):
-    try:
-        r = requests.get(f"http://localhost:{port}/health", timeout=2)
-        print(f"[{attempt}] /health -> {r.status_code} {r.text.strip()}")
-        if r.status_code == 200:
-            print("Model server is ready!")
-            break
-    except requests.RequestException:
-        print(f"[{attempt}] waiting for the API server...")
-    time.sleep(2)
-
-
-test_metadata = pd.read_csv("data/test/metadata.csv")
-sample_file = test_metadata.iloc[0]["filename"]
-sample_label = int(test_metadata.iloc[0]["class"])
-print(f"Sample image: {sample_file} (label={sample_label})")
-
-with open(Path("data/test") / sample_file, "rb") as f:
-    img_b64 = base64.b64encode(f.read()).decode()
-
-payload = {"instances": [img_b64]}
-
-r = requests.post(f"http://localhost:{port}/infer", json=payload, timeout=60)
-print("POST /infer ->", r.status_code)
-pprint(r.json())
-
-print("GET /version ->", requests.get(f"http://localhost:{port}/version").json())
-print("GET /health  ->", requests.get(f"http://localhost:{port}/health").json())
-
-
-logs = load_inference_logs(inference_log_path)
-print(f"Logged requests: {len(logs)}")
-pprint(logs[-3:])
-
-baseline = load_baseline_stats()
-drift_results = detect_drift(logs, days=drift_default_days, baseline_stats=baseline)
-print("\nDrift check results:")
-pprint(drift_results)
-
-if drift_results["overall_drift_detected"]:
-    print("\n!! Drift detected - time to retrain and redeploy")
-else:
-    print("\nNo drift detected")
-
-# The endpoint does the same check over HTTP
-print("\nGET /drift ->")
-pprint(requests.get(f"http://localhost:{port}/drift").json())
-
-
-api_server.should_exit = True
-if scoring_proc is not None and scoring_proc.poll() is None:
-    scoring_proc.terminate()
-    scoring_proc.wait(timeout=10)
-    print("Scoring server stopped")
-print("API server stopped")
+if __name__ == "__main__":
+    main()
