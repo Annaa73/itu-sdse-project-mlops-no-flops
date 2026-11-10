@@ -43,7 +43,11 @@ model_name = "cnn_model"
 mlflow_tracking_uri = f"sqlite:///{mlflow_state_dir}/mlflow.db"
 mlflow_artifact_location = "./mlflow-state/artifacts"
 
-
+### Dataset
+BASE_URL = "https://itudsip.hel1.your-objectstorage.com/data"
+# S3 Configuration for Hetzner
+S3_ENDPOINT = "https://itudsip.hel1.your-objectstorage.com"
+S3_BUCKET = "data"
 
 ### Deployment
 artifact_path = "model_pyfunc"
