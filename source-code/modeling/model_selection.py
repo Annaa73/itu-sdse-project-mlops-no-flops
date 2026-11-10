@@ -5,13 +5,13 @@ import shutil
 import tempfile
 import mlflow
 import json
-import pprint
-import Path
 import time
 
+from pprint import pprint
+from pathlib import Path
 from datetime import datetime, timezone
-from source_code.config import setup_mlflow_tracking
 from mlflow.tracking import MlflowClient
+from source_code.config import setup_mlflow_tracking
 
 from source_code.config import (
     experiment_name,
@@ -99,6 +99,8 @@ def resolve_model_uri(client):
 
 def main():
 
+    setup_mlflow_tracking(experiment_name)
+    print("MLflow tracking URI:", mlflow.get_tracking_uri())
 
     # 1 :: model selection
     #      choose most suitable model from candidates,
@@ -199,9 +201,9 @@ def main():
         print(f"{model_name} version {version} is now in Production")
 
 
-    # 4 :: export the serving model to "mdoels/model".
+    # 4 :: export the serving model to "models/model".
     #      model version and training timestamp are also stored
-    
+
     model_uri, description = resolve_model_uri(client= client)
     print(f"Exporting: {description}")
     print(f"  Source: {model_uri}")
