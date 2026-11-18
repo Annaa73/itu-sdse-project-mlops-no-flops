@@ -3,27 +3,53 @@
 package main
 
 import (
-    "context"
-    "fmt"
+	"context"
+	"fmt"
 
-    "dagger.io/dagger"
+	"dagger.io/dagger"
 )
 
 func main() {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    if err := Pipeline(ctx); err != nil {
-        fmt.Println("Error:", err)
-        panic(err)
-    }
+	if err := Pipeline(ctx); err != nil {
+		fmt.Println("Error:", err)
+		panic(err)
+	}
 }
 
 func Pipeline(ctx context.Context) error {
-    client, err := dagger.Connect(ctx)
-    if err != nil {
-        return err
-    }
-    defer client.Close()
+	client, err := dagger.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
 
-    // ...
+	// Only copy what the pipeline needs into the container.
+	// data/ and models/ are not on the list, so the container
+	// always starts from a fresh machine - the pipeline must
+	// build everything itself.
+	project := client.Host().Directory(".", dagger.HostDirectoryOpts{
+		Include: []string{
+			"source_code",
+			"pyproject.toml",
+			"uv.lock",
+		},
+	})
+
+	// Base container: uv image with your Python version,
+	// with dependencies installed from the lockfile
+	python := client.Container().
+		From("ghcr.io/astral-sh/uv:python3.13-bookworm").
+		WithDirectory("/app", project).
+		WithWorkdir("/app").
+		WithExec([]string{"uv", "sync"})
+
+	// Stage 1: Data
+	data := python.WithExec([]string{"uv", "run", "python", "source_code/dataset.py"})
+	if _, err := data.Directory("data").Export(ctx, "data"); err != nil {
+		return err
+	}
+
+	return nil
 }
