@@ -34,6 +34,10 @@ func Pipeline(ctx context.Context) error {
 			"source_code",
 			"pyproject.toml",
 			"uv.lock",
+			".dvc",
+			".dvcignore",
+			"data/images/metadata.csv.dvc",
+			"data/test/metadata.csv.dvc",
 		},
 	})
 
@@ -46,8 +50,14 @@ func Pipeline(ctx context.Context) error {
 		WithExec([]string{"uv", "sync"})
 
 	// Stage 1: Data
-	data := python.WithExec([]string{"uv", "run", "python", "source_code/dataset.py"})
+	data := python.WithExec([]string{"uv", "run", "python", "-m", "source_code.dataset"})
 	if _, err := data.Directory("data").Export(ctx, "data"); err != nil {
+		return err
+	}
+
+	// Stage 2: Train
+	train := data.WithExec([]string{"uv", "run", "python", "-m", "source_code.modeling.train"})
+	if _, err := train.Directory("artifacts").Export(ctx, "artifacts"); err != nil {
 		return err
 	}
 
