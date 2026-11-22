@@ -61,5 +61,11 @@ func Pipeline(ctx context.Context) error {
 		return err
 	}
 
+    // Stage 3: Model Selection
+    selection := train.WithExec([]string{"uv", "run", "python", "-m", "source_code.modeling.model_selection"})
+    if _, err := selection.Directory("models").Export(ctx, "models"); err != nil {
+        return err
+    }
+
 	return nil
 }
