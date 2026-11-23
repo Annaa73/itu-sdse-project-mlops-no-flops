@@ -67,5 +67,12 @@ func Pipeline(ctx context.Context) error {
         return err
     }
 
+	// Stage 4: Deployment
+	deploy := train.WithExec([]string{"uv", "run", "python", "-m", "source_code.modeling.deploy"})
+	// we dont save anythin so using Sync here ()
+    if _, err := deploy.Sync(ctx); err!=nil {
+        return err
+    }
+
 	return nil
 }
