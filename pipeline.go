@@ -47,7 +47,8 @@ func Pipeline(ctx context.Context) error {
 		From("ghcr.io/astral-sh/uv:python3.13-bookworm").
 		WithDirectory("/app", project).
 		WithWorkdir("/app").
-		WithExec([]string{"uv", "sync"})
+		WithExec([]string{"uv", "sync"}).
+		WithNewFile("/app/.dvc/config.local", "[core]\n    no_scm = true\n")
 
 	// Stage 1: Data
 	data := python.WithExec([]string{"uv", "run", "python", "-m", "source_code.dataset"})
@@ -68,7 +69,7 @@ func Pipeline(ctx context.Context) error {
     }
 
 	// Stage 4: Deployment
-	deploy := train.WithExec([]string{"uv", "run", "python", "-m", "source_code.modeling.deploy"})
+	deploy := selection.WithExec([]string{"uv", "run", "python", "-m", "source_code.modeling.deploy"})
 	// we dont save anythin so using Sync here ()
     if _, err := deploy.Sync(ctx); err!=nil {
         return err
